@@ -72,10 +72,10 @@ are used because facts live at different grains.
 
 | Layer | Owner | Purpose |
 |---|---|---|
-| `clean` | Python (`src/`) | One table per source file, typed, one rule per column, no cross-table FKs. Rebuilt every run. |
+| `clean` | Python (`../src_retired_bc_no_pandas/`) | One table per source file, typed, one rule per column, no cross-table FKs. Rebuilt every run. |
 | `data_warehouse` | SQL (`sql/01_data_warehouse/`) | Normalized model with PKs, FKs and lookup tables. Rebuilt every run from `clean`. |
 | `data_mart` | SQL (`sql/02_data_mart/`) | Star schema for Power BI. Built from `data_warehouse`, nothing else. |
-| `public` | Python (`src/07_data_quality.py`) | Pipeline-level artifact: `data_quality_summary`. |
+| `public` | Python (`../src_retired_bc_no_pandas/07_data_quality.py`) | Pipeline-level artifact: `data_quality_summary`. |
 
 `clean` is the staging layer. `data_warehouse` enforces structure. `data_mart`
 is shaped for reporting. The Python step must run before the SQL step because
@@ -100,10 +100,15 @@ is shaped for reporting. The Python step must run before the SQL step because
   explicit decision rather than a silent miss.
   One institution (CERT 15656) has a blank `BKCLASS`; it is NULLed in
   `01_clean_institutions.py` and appears with `charter_class_code IS NULL`.
-- **Holding company is a column on `institutions`, not a separate entity.**
-  No CERT in the source data has ever been associated with more than one
-  `NAMEHCR`. If a future refresh breaks this, the model needs a
-  `holding_company` dimension.
+- **Holding company is a separate dimension (`holding_company`).** The
+  `fdic_institutions.json` file associates multiple charters with a single
+  holding company (e.g., `NORWEST CORP` is associated with 223 distinct CERTs
+  in the historical directory, and `CITIGROUP INC` with 20). To keep the model
+  normalized and prevent the repeating of parent company names across
+  thousands of charter rows, `data_warehouse.institutions` carries a
+  `holding_company_id` foreign key to `data_warehouse.holding_company`. The
+  mart (`dim_bank`) joins this back to provide the `holding_company_name` text
+  column for the Power BI report.
 - **`failures.fdic_certificate_number` has an FK to `institutions`, but the FK
   allows NULL.** Verified: every non-null CERT in `clean.failures` exists in
   `clean.institutions` (0 orphans). Rows with NULL CERT (488) are valid failure
@@ -160,7 +165,7 @@ is shaped for reporting. The Python step must run before the SQL step because
 | `data_warehouse` | `crosswalk` | one row per CFPB company name | from the crosswalk |
 | `data_warehouse` | `complaints` | one row per complaint | 2019-01 – 2026-06 |
 | `data_warehouse` | `macro_quarterly` | one row per quarter-end | last observation on or before quarter end |
-| `data_warehouse` | `charter_class`, `product`, `issue`, `response_type`, `submission_channel`, `state` | lookup | referenced by FK |
+| `data_warehouse` | `holding_company`, `charter_class`, `product`, `issue`, `response_type`, `submission_channel`, `state` | lookup | referenced by FK |
 
 ---
 

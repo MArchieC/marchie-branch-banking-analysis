@@ -94,7 +94,7 @@ SET client_min_messages = warning;
 -- to reclaim - VACUUM is for visibility and statistics only. After a long running
 -- deployment with many updates, same VACUUM also reclaims dead tuple space, but that
 -- is not what the build needs.
---
+
 -- \gexec is used instead of a DO block because VACUUM cannot run inside a transaction
 -- block, and DO blocks run as a single transaction. \gexec runs each generated statement
 -- as its own statement, outside any transaction.

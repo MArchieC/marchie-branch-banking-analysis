@@ -19,8 +19,16 @@ CREATE TABLE data_mart.dim_bank (
 );
 
 INSERT INTO data_mart.dim_bank
-SELECT fdic_certificate_number, institution_name, holding_company_name, charter_class_code, headquarters_state_code,
-        is_active, established_date, end_date
-FROM data_warehouse.institutions;
+SELECT
+    i.fdic_certificate_number,
+    i.institution_name,
+    h.holding_company_name,
+    i.charter_class_code,
+    i.headquarters_state_code,
+    i.is_active,
+    i.established_date,
+    i.end_date
+FROM data_warehouse.institutions i
+LEFT JOIN data_warehouse.holding_company h ON i.holding_company_id = h.holding_company_id;
 
 COMMIT;

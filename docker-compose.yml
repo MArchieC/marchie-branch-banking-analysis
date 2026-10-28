@@ -19,7 +19,7 @@ services:
     container_name: bank_health_db
 
     # Credentials required by the Postgres image to initialize the database.
-    # Must match the connection settings in src/postgres_connection.py.
+    # Must match the connection settings in src_retired_bc_no_pandas/postgres_connection.py.
     environment:
       POSTGRES_USER: capstone
       POSTGRES_PASSWORD: capstone
@@ -42,7 +42,7 @@ services:
       # Allows `psql -f /sql/...` to run the build scripts from inside the container.
       - ./sql:/sql:ro
 
-    # Tell Docker how to verify database is actually ready to accept connections as without this, Docker only knows
+    # Tell Docker how to verify database is actually ready to accept connections as without this Docker only knows
     # container process started, not that Postgres is ready.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U capstone -d bank_health"]

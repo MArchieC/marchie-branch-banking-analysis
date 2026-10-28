@@ -1,5 +1,4 @@
-# Runtime dependencies for the staging layer (src/).
+# Runtime dependencies for the staging layer
 
-# Pipeline uses the Python standard library for CSV/JSON parsing and date handling, and psycopg2 for PostgreSQL connection.
-
-psycopg2-binary>=2.9.9
+psycopg2-binary>=2.9
+pandas>=3.0

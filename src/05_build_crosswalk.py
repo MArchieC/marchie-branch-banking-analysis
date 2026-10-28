@@ -1,13 +1,12 @@
-"""Build clean.company_crosswalk: mapping each CFPB company name to FDIC charter when possible."""
-
-import csv
+"""Build clean.company_crosswalk using pandas merges."""
+import pandas as pd
+import numpy as np
 import json
 import re
 from postgres_connection import get_connection
-
-
+from psycopg2.extras import execute_values
 from pathlib import Path
-#pattern works from any working directory as path to data folder calculated relative to scripts real location
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "capstone_data"
 COMPLAINTS_FILE = DATA_DIR / "cfpb_complaints.csv"
 INSTITUTIONS_FILE = DATA_DIR / "fdic_institutions.json"
@@ -69,151 +68,127 @@ CATEGORY_KEYWORDS = [
 
 CREATE_TABLE_SQL = """
 CREATE SCHEMA IF NOT EXISTS clean;
-
 CREATE TABLE IF NOT EXISTS clean.company_crosswalk (
-    company_name                      TEXT PRIMARY KEY,
-    company_name_normalized           TEXT NOT NULL,
-    matched_fdic_certificate_number   INTEGER,
-    match_method                      TEXT NOT NULL,
-    company_category                  TEXT NOT NULL
+    company_name TEXT PRIMARY KEY,
+    company_name_normalized TEXT NOT NULL,
+    matched_fdic_certificate_number INTEGER,
+    match_method TEXT NOT NULL,
+    company_category TEXT NOT NULL
 );
 """
 
-# Column order used for INSERT. Kept as list so INSERT is built from same source of truth row builder uses.
-COLUMNS = ["company_name", "company_name_normalized", "matched_fdic_certificate_number", "match_method", "company_category"]
-
-#VALUES are named placeholders in form %(column_name)s for executemany()
-INSERT_SQL = f"INSERT INTO clean.company_crosswalk ({', '.join(COLUMNS)}) VALUES ({', '.join('%(' + c + ')s' for c in COLUMNS)});"
 
 def normalize(name):
-    """Uppercase, & -> AND, expand abbreviations, drop punctuation, collapse whitespace."""
-    if name is None:
-        return ""
-    
-    uppercased = name.upper().replace("&", " AND ")
-    #collapse N.A. / N. A. / N A to a single NA by function end
+    if pd.isna(name): return ""
+    uppercased = str(name).upper().replace("&", " AND ")
     uppercased = re.sub(r"\bN\s*\.?\s*A\b", " NA ", uppercased)
-    
-    cleaned = re.sub(r"[^A-Z0-9 ]", " ", uppercased) #keep letters, digits, spaces
-    
-    words = [ABBREVIATION_EXPANSIONS.get(w, w) for w in cleaned.split()] #avoid KeyError if key doesn't exist
-    
+    cleaned = re.sub(r"[^A-Z0-9 ]", " ", uppercased)
+    words = [ABBREVIATION_EXPANSIONS.get(w, w) for w in cleaned.split()]
     return " ".join(words)
 
+
 def strip_suffixes(normalized_name):
-    """Remove trailing corporate suffixes, applied iteratively from right."""
-    list_of_words = normalized_name.split()
-    while list_of_words != [] and list_of_words[-1] in CORPORATE_SUFFIXES:
-        list_of_words.pop()
-    return " ".join(list_of_words)
+    words = normalized_name.split()
+    while words and words[-1] in CORPORATE_SUFFIXES: words.pop()
+    return " ".join(words)
 
-def load_fdic_index():
-    """Return {normalized_name: certificate_number} for every FDIC charter name and holding company name. When multiple
-    charters share a NAMEHCR largest by total assets wins."""
-    with open(INSTITUTIONS_FILE) as f:
-        records: list[dict] = json.load(f) #parse whole file into Python objects such that 'records' becomes list of dicts
-
-    index = {}  #holds {normalized_name: certificate_number} only for largest by total assets
-    tracking_dict = {}   #keeps track of highest asset amt seen so far
-
-    for record in records:
-        data = record["data"]
-        cert = data.get("CERT")
-
-        if cert is None:
-            continue
-
-        # Step 1 of 2: index bank name
-        bank_name = data.get("NAME")
-        if bank_name:
-        #setdefault method returns key value if key exists in dict else inserts key with a specified default value and returns that value.
-            index.setdefault(normalize(bank_name), int(cert))
-
-        # Step 2 of 2: index holding company name having highest assets (necessary for PowerBI Bank Scorecard page)
-        holding_company_name = data.get("NAMEHCR")
-        if holding_company_name:
-            key = normalize(holding_company_name)
-            assets = data.get("ASSET") or 0
-            if assets > tracking_dict.get(key, -1):
-                index[key] = int(cert)  #always yields cert number of highest asset for given HCR
-                tracking_dict[key] = assets  #tracking dict updates its max value to latest highest asset amt
-    return index
 
 def categorize(company_name):
-    """Return category for a company that did not match an FDIC charter."""
-    uppercased = company_name.upper()
-    for category, keywords in CATEGORY_KEYWORDS:
-        for keyword in keywords:
-            if keyword in uppercased:
-                return category
+    upper = str(company_name).upper()
+    for cat, keys in CATEGORY_KEYWORDS:
+        #any() looks through for expression and returns True moment check is true
+        if any(k in upper for k in keys): return cat
     return "unknown"
 
-def match_cfpb_company(cfpb_company_name, fdic_index_argument):
-    """Return (cert_or_None, match_method, category) for one CFPB company name."""
-    normalized_cfpb_company_name_argument = normalize(cfpb_company_name)
-    if normalized_cfpb_company_name_argument == "":
-        return None, "unmatched", "unknown"
 
-    # Step 4 first: manual override, keyed by CFPB name so multiple CFPB names can resolve to same FDIC charter. Runs
-    # before automatic lookups because manual override is authoritative.
-    for cfpb_name, fdic_name in MANUAL_OVERRIDES.items():
-        if normalize(cfpb_name) == normalized_cfpb_company_name_argument:
-            cert = fdic_index_argument.get(normalize(fdic_name))
-            if cert is not None:
-                return cert, "manual_override", "bank"
+def load_fdic_index():
+    with open(INSTITUTIONS_FILE) as f:
+        records = json.load(f)
+    index, tracking = {}, {}
+    for record in records:
+        data = record.get("data", {})
+        cert = data.get("CERT")
+        if cert is None: continue
 
-    # Step 2: exact match.
-    cert = fdic_index_argument.get(normalized_cfpb_company_name_argument)
-    if cert is not None:
-        return cert, "exact", "bank"
+        bank_name = data.get("NAME")
+        if bank_name: index.setdefault(normalize(bank_name), int(cert))
 
-    # Step 3: suffix-stripped match with the empty string guard.
-    stripped = strip_suffixes(normalized_cfpb_company_name_argument)
-    if stripped:
-        cert = fdic_index_argument.get(stripped)
-        if cert is not None:
-            return cert, "suffix_stripped", "bank"
+        hcr = data.get("NAMEHCR")
+        if hcr:
+            key = normalize(hcr)
+            assets = data.get("ASSET") or 0
+            if assets > tracking.get(key, -1):
+                index[key] = int(cert)
+                tracking[key] = assets
+    return index
 
-    # Step 5: categorize the remainder.
-    return None, "unmatched", categorize(cfpb_company_name)
 
 def main():
+    # 1 Get distinct companies from complaints
+    df_complaints = pd.read_csv(COMPLAINTS_FILE, usecols=['Company'])
+    df = pd.DataFrame({'company_name': df_complaints['Company'].str.lower().dropna().unique()})
+    df['company_name_normalized'] = df['company_name'].apply(normalize)
 
-    #Yield distinct CFPB company names from complaints file.
-    with open(COMPLAINTS_FILE, newline="") as f:
-        reader = csv.DictReader(f) #DictReader = iterator of dicts keyed by the CSV header row returning every field as string
-
-        #Collapsing case so values that differ only by case are treated as one company since PostgreSQL's case-sensitive
-        #TEXT PK accepts 'ONEMAIN...' and 'OneMain...' as two keys whereas Power BI's case-insensitive collation does
-        #not such that trying to create PowerBI relationship fails on duplicates. Canonical form = lowercase.
-        #Using set comprehension to yield sorted list of every distinct Company value that is non-empty.
-        company_names = sorted({record["Company"].lower() for record in reader if record.get("Company")})
-
+    # 2 Build FDIC Index
     fdic_index = load_fdic_index()
 
-    rows: list[dict] = []
-    for company_name in company_names:
-        normalized = normalize(company_name)
-        cert, method, category = match_cfpb_company(company_name, fdic_index)
-        rows.append({
-            "company_name": company_name,
-            "company_name_normalized": normalized,
-            "matched_fdic_certificate_number": cert,
-            "match_method": method,
-            "company_category": category,
-        })
+    # 3 Matching Logic
+    certs, methods, categories = [], [], []
 
-    #open 2 context managers in sequence:
-        #get_connection() returns psycopg2 connection object which is pipe from Python to Postgres
-        #db_connect.cursor() returns a cursor object from that connection which is the worker on pipe to Postgres
+    # iterrows() is generator that loops through DataFrame row by row yielding tuple for each row containing index
+    # (row label) and row data as a Pandas Series
+    for _, row in df.iterrows():
+        name = row['company_name']
+        norm = row['company_name_normalized']
+
+        cert, method, cat = None, "unmatched", "unknown"
+
+        # Manual Override
+        for cfpb_name, fdic_name in MANUAL_OVERRIDES.items():
+            if normalize(cfpb_name) == norm:
+                cert = fdic_index.get(normalize(fdic_name))
+                if cert: method, cat = "manual_override", "bank"; break
+
+        # Exact Match
+        if not cert:
+            cert = fdic_index.get(norm)
+            if cert: method, cat = "exact", "bank"
+
+        # Suffix Stripped
+        if not cert:
+            stripped = strip_suffixes(norm)
+            if stripped:
+                cert = fdic_index.get(stripped)
+                if cert: method, cat = "suffix_stripped", "bank"
+
+        # Categorize Unmatched
+        if not cert: cat = categorize(name)
+
+        certs.append(cert)
+        methods.append(method)
+        categories.append(cat)
+
+    df['matched_fdic_certificate_number'] = certs
+    df['match_method'] = methods
+    df['company_category'] = categories
+
+    cols = ["company_name", "company_name_normalized", "matched_fdic_certificate_number", "match_method",
+            "company_category"]
+
+    # Bulk Insert
+    # Finds every NaN in DataFrame and swaps for Python's None object which psycopg2 correctly translates to SQL NULL
+    # execute_values requires each row to be a tuple
+    rows = [tuple(x) for x in df.replace({np.nan: None}).to_numpy()]
+
     with get_connection() as db_connect, db_connect.cursor() as cursor_object:
         cursor_object.execute(CREATE_TABLE_SQL)
         cursor_object.execute("TRUNCATE clean.company_crosswalk;")
-        cursor_object.executemany(INSERT_SQL, rows)
+        execute_values(cursor_object, f"INSERT INTO clean.company_crosswalk ({', '.join(cols)}) VALUES %s", rows)
         db_connect.commit()
 
-    matched_count = sum(1 for r in rows if r["matched_fdic_certificate_number"] is not None)
-    print(f"clean.company_crosswalk loaded: {len(rows)} company names ({matched_count} matched)")
+    print(
+        f"clean.company_crosswalk loaded: {len(df)} company names ({df['matched_fdic_certificate_number'].notna().sum()} matched)")
+
 
 if __name__ == "__main__":
     main()

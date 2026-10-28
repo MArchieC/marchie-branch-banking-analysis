@@ -164,7 +164,7 @@ The crosswalk runs on every pipeline execution. If the CFPB adds new company nam
 ## 5. Reproducing
 
 ```bash
-python src/05_build_crosswalk.py
+python src_retired_bc_no_pandas/05_build_crosswalk.py
 ```
 
 The script reads `cfpb_complaints.csv` and `fdic_institutions.json`, writes `clean.company_crosswalk`, and reports the matched count at the end. The `data_quality_summary` table records the matched/unmatched company counts and the complaint coverage under `crosswalk_matched`, `crosswalk_unmatched` and `crosswalk_complaint_coverage`.

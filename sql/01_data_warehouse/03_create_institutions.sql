@@ -17,7 +17,7 @@ CREATE TABLE data_warehouse.institutions (
     -- ACTIVE = 1 mapped to boolean in clean; NOT NULL means every row has a definite status.
     is_active                BOOLEAN  NOT NULL,
     charter_class_code       TEXT     REFERENCES data_warehouse.charter_class (charter_class_code),
-    holding_company_name     TEXT,
+    holding_company_id       INTEGER  REFERENCES data_warehouse.holding_company (holding_company_id),
     federal_reserve_rssd_id  TEXT,
     established_date         DATE,
     end_date                 DATE,
@@ -25,9 +25,22 @@ CREATE TABLE data_warehouse.institutions (
 );
 
 INSERT INTO data_warehouse.institutions
-SELECT fdic_certificate_number, institution_name, headquarters_city, headquarters_state_code, headquarters_zip_code,
-    total_assets_thousands, total_deposits_thousands, is_active, charter_class_code, holding_company_name,
-    federal_reserve_rssd_id, established_date, end_date, website_address
-FROM clean.institutions;
+SELECT
+    c.fdic_certificate_number,
+    c.institution_name,
+    c.headquarters_city,
+    c.headquarters_state_code,
+    c.headquarters_zip_code,
+    c.total_assets_thousands,
+    c.total_deposits_thousands,
+    c.is_active,
+    c.charter_class_code,
+    h.holding_company_id,
+    c.federal_reserve_rssd_id,
+    c.established_date,
+    c.end_date,
+    c.website_address
+FROM clean.institutions c
+LEFT JOIN data_warehouse.holding_company h ON c.holding_company_name = h.holding_company_name;
 
 COMMIT;

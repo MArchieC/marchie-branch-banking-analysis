@@ -29,7 +29,7 @@ for the written report.
 ## 2. Layout
 
 ```
-src/                                Python staging: raw -> clean.*
+src/                                Python staging (pandas): raw -> clean.*
   01_clean_institutions.py
   02_clean_financials.py
   03_clean_failures.py
@@ -39,6 +39,8 @@ src/                                Python staging: raw -> clean.*
   07_data_quality.py
   postgres_connection.py
   run_all_python_cleaning.py
+src_retired_bc_no_pandas/           Python staging (standard library): raw -> clean.*
+  (same file structure as src/; kept for reference and comparison)
 sql/
   01_data_warehouse/                data_warehouse.* built from clean.*
   02_data_mart/                     Star schema for Power BI, built from data_warehouse.*
@@ -80,6 +82,7 @@ requirements.txt                    Python dependencies
   `data_warehouse.*` and `data_mart.*` object.
 - The report reads only from `data_mart`. Nothing in the Power BI model
   connects to `clean` or `data_warehouse`.
+- **Python staging implementations:** The assignment required the Python layer to use `pandas`. Both `src/` (pandas) and `src_retired_bc_no_pandas/` (standard library only) produce identical `clean.*` tables. The standard `src/` is the default used in Setup below. The `src_retired_bc_no_pandas/` version is retained to demonstrate both approaches work.
 
 ## 4. Setup
 

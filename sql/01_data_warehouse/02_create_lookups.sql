@@ -114,4 +114,19 @@ SELECT DISTINCT code FROM (
 WHERE code IS NOT NULL
 ORDER BY code;
 
+-- Holding company dimension. Extracted from the institution records.
+-- A single holding company can own multiple charters (1-to-many relationship).
+DROP TABLE IF EXISTS data_warehouse.holding_company CASCADE;
+CREATE TABLE data_warehouse.holding_company (
+    holding_company_id   INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    holding_company_name TEXT NOT NULL UNIQUE CHECK (btrim(holding_company_name) <> '')
+);
+
+INSERT INTO data_warehouse.holding_company (holding_company_name)
+SELECT DISTINCT holding_company_name
+FROM clean.institutions
+WHERE holding_company_name IS NOT NULL
+ORDER BY holding_company_name;
+
+
 COMMIT;
