@@ -2,6 +2,10 @@
 *.csv
 *.json
 
+
+# dbt
+capstone_dbt/
+
 # Python environment
 venv/
 env/
